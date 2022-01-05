@@ -1,0 +1,283 @@
+---
+Description: Purpose-built app for Monte Carlo Simulations using AWS Batch
+
+Parameters:
+  EcsOptimizedAmazonLinux2RecommendedImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc
+
+  VpcPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/17
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc/PublicSubnet
+
+  VpcPublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc/PublicSubnet
+
+  VpcPublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref VpcPublicSubnetRouteTable
+      SubnetId: !Ref VpcPublicSubnet
+
+  VpcPublicSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref VpcPublicSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref VpcIGW
+
+  VpcPublicSubnetEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc/PublicSubnet
+
+  VpcPublicSubnetNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref VpcPublicSubnet
+      AllocationId: !GetAtt VpcPublicSubnetEIP.AllocationId
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc/PublicSubnet
+
+  VpcPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.128.0/17
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc/PrivateSubnet
+
+  VpcPrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc/PrivateSubnet
+
+  VpcPrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref VpcPrivateSubnetRouteTable
+      SubnetId: !Ref VpcPrivateSubnet
+
+  VpcPrivateSubnetDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VpcPrivateSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref VpcPublicSubnetNATGateway
+
+  VpcIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/vpc
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref VpcIGW
+
+  Bucket:
+    Type: AWS::S3::Bucket
+
+
+  ComputeEnvironmentSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: pba-monte-carlo-aws-batch-blog/compute-environment-security-group
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/compute-environment-security-group
+
+  ComputeEnvironmentEcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: !Sub "ec2.${AWS::URLSuffix}"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess"
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/compute-environment-ecs-instance-role
+
+  ComputeEnvironmentInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ComputeEnvironmentEcsInstanceRole
+
+  ComputeEnvironmentServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: batch.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBatchServiceRole"
+      Tags:
+        - Key: Name
+          Value: pba-monte-carlo-aws-batch-blog/compute-environment-service-role
+
+  ComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: MANAGED
+      State: ENABLED
+      ServiceRole: !GetAtt ComputeEnvironmentServiceRole.Arn
+      ComputeResources:
+        Type: EC2
+        AllocationStrategy: BEST_FIT
+        MinvCpus: 0
+        MaxvCpus: 32
+        DesiredvCpus: 0
+        InstanceTypes:
+          - optimal
+        ImageId: !Ref EcsOptimizedAmazonLinux2RecommendedImageId
+        InstanceRole: !GetAtt ComputeEnvironmentInstanceProfile.Arn
+        SecurityGroupIds:
+          - !GetAtt ComputeEnvironmentSecurityGroup.GroupId
+        Subnets:
+          - !Ref VpcPrivateSubnet
+
+  JobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: pba-monte-carlo-aws-batch-job-blog-queue
+      Priority: 1
+      State: ENABLED
+      ComputeEnvironmentOrder:
+        - ComputeEnvironment: !Ref ComputeEnvironment
+          Order: 1
+
+  RepositorySim:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: pba-monte-carlo-sim-aws-batch-blog
+
+  RepositoryColl:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: pba-monte-carlo-coll-aws-batch-blog
+
+  JobDefinitionSim:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      Type: container
+      JobDefinitionName: pba-monte-carlo-sim-aws-batch-job-definition-blog
+      PlatformCapabilities:
+        - EC2
+      RetryStrategy:
+        Attempts: 3
+      ContainerProperties:
+        Image: !Join
+          - ""
+          - - !Select [4, !Split [":", !GetAtt RepositorySim.Arn]]
+            - ".dkr.ecr."
+            - !Select [3, !Split [":", !GetAtt RepositorySim.Arn]]
+            - !Sub ".${AWS::URLSuffix}/${RepositorySim}:latest"
+        Vcpus: 2
+        Memory: 7168
+        LogConfiguration:
+          LogDriver: awslogs
+        Privileged: false
+        ReadonlyRootFilesystem: false
+        Environment:
+          - Name: AWS_BUCKET
+            Value: !Ref Bucket
+
+  JobDefinitionColl:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      Type: container
+      JobDefinitionName: pba-monte-carlo-coll-aws-batch-job-definition-blog
+      PlatformCapabilities:
+        - EC2
+      RetryStrategy:
+        Attempts: 3
+      ContainerProperties:
+        Image: !Join
+          - ""
+          - - !Select [4, !Split [":", !GetAtt RepositoryColl.Arn]]
+            - ".dkr.ecr."
+            - !Select [3, !Split [":", !GetAtt RepositoryColl.Arn]]
+            - !Sub ".${AWS::URLSuffix}/${RepositoryColl}:latest"
+        Vcpus: 2
+        Memory: 7168
+        LogConfiguration:
+          LogDriver: awslogs
+        Privileged: false
+        ReadonlyRootFilesystem: false
+        Environment:
+          - Name: AWS_BUCKET
+            Value: !Ref Bucket
+
+Outputs:
+  BucketName:
+    Value: !Ref Bucket
+
+  RepositorySimUri:
+    Value: !Join
+      - ""
+      - - !Select [4, !Split [":", !GetAtt RepositorySim.Arn]]
+        - ".dkr.ecr."
+        - !Select [3, !Split [":", !GetAtt RepositorySim.Arn]]
+        - !Sub ".${AWS::URLSuffix}/${RepositorySim}"
+
+  RepositoryCollUri:
+    Value: !Join
+      - ""
+      - - !Select [4, !Split [":", !GetAtt RepositoryColl.Arn]]
+        - ".dkr.ecr."
+        - !Select [3, !Split [":", !GetAtt RepositoryColl.Arn]]
+        - !Sub ".${AWS::URLSuffix}/${RepositoryColl}"
+
