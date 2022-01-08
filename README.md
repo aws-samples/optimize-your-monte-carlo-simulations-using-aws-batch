@@ -1,5 +1,7 @@
 # Monte Carlo simulations for finance
 
+Refer to AWS Workshop Studio for detailed code implementation steps - https://catalog.us-east-1.prod.workshops.aws/v2/workshops/f0e00661-b38d-43d3-b731-7fb608e71d32/en-US/intro
+
 ## Architecture diagram
 
 ![PBA MC Arch](PBA-MC-Arch.png)
