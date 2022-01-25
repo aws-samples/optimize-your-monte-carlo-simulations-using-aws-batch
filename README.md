@@ -10,7 +10,7 @@ Refer to AWS Workshop Studio for detailed code implementation steps - https://ca
 ```
 |-- coll
 | |--Dockerfile
-| |--mc_sum_coll_blog.py
+| |--mc_sim_coll_blog.py
 | |--requirements.txt
 |-- infra
 | |--template.yml
