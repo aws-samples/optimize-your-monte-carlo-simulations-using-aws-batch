@@ -18,7 +18,7 @@ Refer to AWS Workshop Studio for detailed code implementation steps - https://ca
 | |--Dockerfile
 | |--mc_sim_blog.py
 | |--requirements.txt
-|-- assest_prices.csv
+|-- asset_prices.csv
 |-- bnp.sh
 |-- README.md
 ```
@@ -33,7 +33,7 @@ Refer to AWS Workshop Studio for detailed code implementation steps - https://ca
   [COMMENT: This is the reason to split this up into 2 distinct steps, as
   the analysis of MC results needed in each case is independent of running
   the MC simulations themselves]
-- `assest_prices.csv`: dataset
+- `asset_prices.csv`: dataset
 - `bnp.sh`: build and push file to package code
 
 
